@@ -1,7 +1,25 @@
 import sqlite3
 import os
+from flask import Flask, request, jsonify
+from flask_socketio import SocketIO, emit
+import pandas as pd
+import pickle
+import re
+from urllib.parse import urlparse
+from datetime import datetime
+import logging
+from sklearn.preprocessing import StandardScaler
+import bcrypt
 
-# Use in-memory database for Render (or a file for local testing)
+# Flask app setup
+app = Flask(__name__)
+app.config['SECRET_KEY'] = 'your-secret-key'  # Needed for Flask-SocketIO
+socketio = SocketIO(app, cors_allowed_origins="*")
+
+# Setup logging
+logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
+
+# SQLite database setup
 if os.getenv('RENDER'):
     conn = sqlite3.connect(':memory:', check_same_thread=False)
 else:
@@ -21,38 +39,10 @@ cursor.execute('''
 ''')
 conn.commit()
 
-import http.server
-import socketserver
-import json
-import pandas as pd
-import pickle
-import re
-import hashlib
-from urllib.parse import urlparse
-from datetime import datetime
-import os
-import logging
-from sklearn.preprocessing import StandardScaler
-
-# Setup logging
-logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
-
 # Trusted domains
 TRUSTED_DOMAINS = {'google.com', 'facebook.com', 'amazon.com', 'microsoft.com', 'apple.com'}
 
-# Initialize user CSV
-USER_CSV = 'users.csv'
-if not os.path.exists(USER_CSV):
-    pd.DataFrame(columns=['name', 'username', 'password_hash', 'mobile', 'email', 'signup_date']).to_csv(USER_CSV, index=False)
-
-# User activity CSV
-USER_ACTIVITY_FILE = 'user_activity.csv'
-if not os.path.exists(USER_ACTIVITY_FILE):
-    pd.DataFrame(columns=['username', 'timestamp', 'url', 'result']).to_csv(USER_ACTIVITY_FILE, index=False)
-
 # Load pre-trained model (default: Random Forest)
-# To use SVM, change to 'svm_phishing_model.pkl'
-# To use Logistic Regression, change to 'lr_phishing_model.pkl'
 MODEL_FILE = 'rf_phishing_model.pkl'
 try:
     with open(MODEL_FILE, 'rb') as f:
@@ -142,194 +132,20 @@ def extract_features(url):
     }
     return pd.DataFrame([features])
 
-# Log user activity
+# Log user activity to SQLite
 def log_activity(username, url, result):
     try:
-        df = pd.DataFrame({
-            'username': [username],
-            'timestamp': [datetime.now().isoformat()],
-            'url': [url],
-            'result': [result]
-        })
-        df.to_csv(USER_ACTIVITY_FILE, mode='a', header=not os.path.exists(USER_ACTIVITY_FILE), index=False)
+        cursor.execute(
+            "INSERT INTO user_activity (username, timestamp, url, result) VALUES (?, ?, ?, ?)",
+            (username, datetime.now().isoformat(), url, result)
+        )
+        conn.commit()
+        # Emit live update to all connected clients
+        socketio.emit('activity_update', {'username': username, 'url': url, 'result': result})
     except Exception as e:
         logging.error(f"Error logging activity: {e}")
 
-# Hash password
-def hash_password(password):
-    return hashlib.sha256(password.encode()).hexdigest()
-
-class RequestHandler(http.server.BaseHTTPRequestHandler):
-    def do_POST(self):
-        try:
-            content_length = int(self.headers['Content-Length'])
-            post_data = self.rfile.read(content_length).decode('utf-8')
-            data = json.loads(post_data)
-            logging.debug(f"Received POST data: {data}")
-
-            if self.path == '/signup':
-                name = data.get('name', '').strip()
-                username = data.get('username', '').strip()
-                password = data.get('password', '').strip()
-                mobile = data.get('mobile', '').strip()
-                email = data.get('email', '').strip()
-
-                if not all([name, username, password, mobile, email]):
-                    self.send_response(400)
-                    self.send_header('Content-Type', 'application/json')
-                    self.end_headers()
-                    self.wfile.write(json.dumps({'error': 'All fields required for SYSTEM REGISTRATION'}).encode('utf-8'))
-                    logging.warning("Sign-up failed: Missing fields")
-                    return
-
-                try:
-                    df = pd.read_csv(USER_CSV)
-                except Exception as e:
-                    logging.error(f"Error reading users.csv: {e}")
-                    self.send_response(500)
-                    self.send_header('Content-Type', 'application/json')
-                    self.end_headers()
-                    self.wfile.write(json.dumps({'error': 'CRITICAL SERVER ERROR'}).encode('utf-8'))
-                    return
-
-                if username.lower() in df['username'].str.lower().values:
-                    self.send_response(400)
-                    self.send_header('Content-Type', 'application/json')
-                    self.end_headers()
-                    self.wfile.write(json.dumps({'error': 'Username already exists in DATABASE'}).encode('utf-8'))
-                    logging.warning(f"Sign-up failed: Username {username} already exists")
-                    return
-
-                signup_date = datetime.now().isoformat()
-                new_user = pd.DataFrame({
-                    'name': [name],
-                    'username': [username],
-                    'password_hash': [hash_password(password)],
-                    'mobile': [mobile],
-                    'email': [email],
-                    'signup_date': [signup_date]
-                })
-                try:
-                    new_user.to_csv(USER_CSV, mode='a', header=not os.path.exists(USER_CSV), index=False)
-                    logging.info(f"User {username} signed up successfully")
-                except Exception as e:
-                    logging.error(f"Error writing to users.csv: {e}")
-                    self.send_response(500)
-                    self.send_header('Content-Type', 'application/json')
-                    self.end_headers()
-                    self.wfile.write(json.dumps({'error': 'CRITICAL DATABASE ERROR'}).encode('utf-8'))
-                    return
-
-                self.send_response(200)
-                self.send_header('Content-Type', 'application/json')
-                self.send_header('Access-Control-Allow-Origin', '*')
-                self.end_headers()
-                self.wfile.write(json.dumps({'message': 'SYSTEM REGISTRATION COMPLETE'}).encode('utf-8'))
-
-            elif self.path == '/login':
-                username = data.get('username', '').strip()
-                password = data.get('password', '').strip()
-
-                if not username or not password:
-                    self.send_response(400)
-                    self.send_header('Content-Type', 'application/json')
-                    self.end_headers()
-                    self.wfile.write(json.dumps({'error': 'AUTHENTICATION CREDENTIALS REQUIRED'}).encode('utf-8'))
-                    logging.warning("Login failed: Missing username or password")
-                    return
-
-                try:
-                    df = pd.read_csv(USER_CSV)
-                except Exception as e:
-                    logging.error(f"Error reading users.csv: {e}")
-                    self.send_response(500)
-                    self.send_header('Content-Type', 'application/json')
-                    self.end_headers()
-                    self.wfile.write(json.dumps({'error': 'CRITICAL SERVER ERROR'}).encode('utf-8'))
-                    return
-
-                user_data = df[df['username'].str.lower() == username.lower()]
-                if user_data.empty:
-                    self.send_response(401)
-                    self.send_header('Content-Type', 'application/json')
-                    self.end_headers()
-                    self.wfile.write(json.dumps({'error': 'USER NOT FOUND. INITIATE SYSTEM REGISTRATION.'}).encode('utf-8'))
-                    logging.warning(f"Login failed: User {username} does not exist")
-                    return
-
-                if user_data['password_hash'].iloc[0] != hash_password(password):
-                    self.send_response(401)
-                    self.send_header('Content-Type', 'application/json')
-                    self.end_headers()
-                    self.wfile.write(json.dumps({'error': 'AUTHENTICATION FAILED: INVALID CREDENTIALS'}).encode('utf-8'))
-                    logging.warning(f"Login failed: Invalid password for {username}")
-                    return
-
-                self.send_response(200)
-                self.send_header('Content-Type', 'application/json')
-                self.send_header('Access-Control-Allow-Origin', '*')
-                self.end_headers()
-                self.wfile.write(json.dumps({'message': 'AUTHENTICATION SUCCESSFUL', 'username': username}).encode('utf-8'))
-                logging.info(f"User {username} logged in successfully")
-
-            elif self.path == '/predict':
-                url = data.get('url', '').strip()
-                username = data.get('username', '').strip()
-                if not url or not username:
-                    self.send_response(400)
-                    self.send_header('Content-Type', 'application/json')
-                    self.end_headers()
-                    self.wfile.write(json.dumps({'error': 'URL AND USERID REQUIRED FOR SCAN'}).encode('utf-8'))
-                    logging.warning("Prediction failed: Missing URL or username")
-                    return
-
-                if not is_valid_url(url):
-                    self.send_response(400)
-                    self.send_header('Content-Type', 'application/json')
-                    self.end_headers()
-                    self.wfile.write(json.dumps({'error': 'INVALID TARGET VECTOR: VALID TLD REQUIRED'}).encode('utf-8'))
-                    logging.warning(f"Prediction failed: Invalid URL {url}")
-                    return
-
-                features = extract_features(url)
-                # Scale features for SVM or Logistic Regression
-                if MODEL_FILE in ['svm_phishing_model.pkl', 'lr_phishing_model.pkl']:
-                    features = scaler.transform(features)
-                prediction = model.predict(features)[0]
-                probability = float(model.predict_proba(features)[0][1])
-                result = 'Phishing' if prediction == 1 else 'Legitimate'
-
-                log_activity(username, url, result)
-
-                self.send_response(200)
-                self.send_header('Content-Type', 'application/json')
-                self.send_header('Access-Control-Allow-Origin', '*')
-                self.end_headers()
-                response = {
-                    'result': result,
-                    'probability': round(probability * 100, 2),
-                    'url': url
-                }
-                self.wfile.write(json.dumps(response).encode('utf-8'))
-                logging.info(f"Prediction for {username}: {url} -> {result}")
-
-            else:
-                self.send_response(404)
-                self.end_headers()
-
-        except Exception as e:
-            logging.error(f"Server error: {e}")
-            self.send_response(500)
-            self.send_header('Content-Type', 'application/json')
-            self.end_headers()
-            self.wfile.write(json.dumps({'error': 'CRITICAL SYSTEM FAILURE: ' + str(e)}).encode('utf-8'))
-
-    def do_OPTIONS(self):
-        self.send_response(200)
-        self.send_header('Access-Control-Allow-Origin', '*')
-        self.send_header('Access-Control-Allow-Methods', 'POST, OPTIONS')
-        self.send_header('Access-Control-Allow-Headers', 'Content-Type')
-        self.end_headers()
+# Flask routes
 @app.route('/signup', methods=['POST'])
 def signup():
     data = request.get_json()
@@ -343,14 +159,69 @@ def signup():
     )
     conn.commit()
     socketio.emit('user_update', {'username': data['username']})
+    logging.info(f"User {data['username']} signed up successfully")
     return jsonify({'message': 'REGISTRATION SUCCESSFUL'}), 200
 
-# Run server
-PORT = 5000
-with socketserver.TCPServer(("", PORT), RequestHandler) as httpd:
-    print(f"Serving at http://localhost:{PORT}")
-    logging.info(f"Server started at http://localhost:{PORT}")
-    httpd.serve_forever()
+@app.route('/login', methods=['POST'])
+def login():
+    data = request.get_json()
+    username = data.get('username', '').strip()
+    password = data.get('password', '').strip()
+
+    if not username or not password:
+        return jsonify({'error': 'AUTHENTICATION CREDENTIALS REQUIRED'}), 400
+
+    cursor.execute("SELECT * FROM users WHERE username = ?", (username,))
+    user = cursor.fetchone()
+    if not user:
+        logging.warning(f"Login failed: User {username} does not exist")
+        return jsonify({'error': 'USER NOT FOUND. INITIATE SYSTEM REGISTRATION.'}), 401
+
+    # user is a tuple: (name, username, password, mobile, email)
+    stored_password = user[2]
+    if not bcrypt.checkpw(password.encode('utf-8'), stored_password.encode('utf-8')):
+        logging.warning(f"Login failed: Invalid password for {username}")
+        return jsonify({'error': 'AUTHENTICATION FAILED: INVALID CREDENTIALS'}), 401
+
+    logging.info(f"User {username} logged in successfully")
+    return jsonify({'message': 'AUTHENTICATION SUCCESSFUL', 'username': username}), 200
+
+@app.route('/predict', methods=['POST'])
+def predict():
+    data = request.get_json()
+    url = data.get('url', '').strip()
+    username = data.get('username', '').strip()
+
+    if not url or not username:
+        logging.warning("Prediction failed: Missing URL or username")
+        return jsonify({'error': 'URL AND USERID REQUIRED FOR SCAN'}), 400
+
+    if not is_valid_url(url):
+        logging.warning(f"Prediction failed: Invalid URL {url}")
+        return jsonify({'error': 'INVALID TARGET VECTOR: VALID TLD REQUIRED'}), 400
+
+    features = extract_features(url)
+    if MODEL_FILE in ['svm_phishing_model.pkl', 'lr_phishing_model.pkl']:
+        features = scaler.transform(features)
+    prediction = model.predict(features)[0]
+    probability = float(model.predict_proba(features)[0][1])
+    result = 'Phishing' if prediction == 1 else 'Legitimate'
+
+    log_activity(username, url, result)
+
+    response = {
+        'result': result,
+        'probability': round(probability * 100, 2),
+        'url': url
+    }
+    logging.info(f"Prediction for {username}: {url} -> {result}")
+    return jsonify(response), 200
+
+@app.route('/')
+def serve_index():
+    return app.send_static_file('index.html')
+
+# Run the app
 if __name__ == '__main__':
     socketio.run(app, debug=True, host='0.0.0.0', port=5000)
 else:
