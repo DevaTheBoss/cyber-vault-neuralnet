@@ -1,3 +1,26 @@
+import sqlite3
+import os
+
+# Use in-memory database for Render (or a file for local testing)
+if os.getenv('RENDER'):
+    conn = sqlite3.connect(':memory:', check_same_thread=False)
+else:
+    conn = sqlite3.connect('database.db', check_same_thread=False)
+cursor = conn.cursor()
+
+# Create tables
+cursor.execute('''
+    CREATE TABLE IF NOT EXISTS users (
+        name TEXT, username TEXT PRIMARY KEY, password TEXT, mobile TEXT, email TEXT
+    )
+''')
+cursor.execute('''
+    CREATE TABLE IF NOT EXISTS user_activity (
+        username TEXT, timestamp TEXT, url TEXT, result TEXT
+    )
+''')
+conn.commit()
+
 import http.server
 import socketserver
 import json
@@ -307,6 +330,20 @@ class RequestHandler(http.server.BaseHTTPRequestHandler):
         self.send_header('Access-Control-Allow-Methods', 'POST, OPTIONS')
         self.send_header('Access-Control-Allow-Headers', 'Content-Type')
         self.end_headers()
+@app.route('/signup', methods=['POST'])
+def signup():
+    data = request.get_json()
+    cursor.execute("SELECT username FROM users WHERE username = ?", (data['username'],))
+    if cursor.fetchone():
+        return jsonify({'error': 'USERID ALREADY EXISTS'}), 400
+    hashed_password = bcrypt.hashpw(data['password'].encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+    cursor.execute(
+        "INSERT INTO users (name, username, password, mobile, email) VALUES (?, ?, ?, ?, ?)",
+        (data['name'], data['username'], hashed_password, data['mobile'], data['email'])
+    )
+    conn.commit()
+    socketio.emit('user_update', {'username': data['username']})
+    return jsonify({'message': 'REGISTRATION SUCCESSFUL'}), 200
 
 # Run server
 PORT = 5000
