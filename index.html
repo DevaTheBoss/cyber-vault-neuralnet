@@ -1,0 +1,680 @@
+<script type="text/javascript">
+        var gk_isXlsx = false;
+        var gk_xlsxFileLookup = {};
+        var gk_fileData = {};
+        function filledCell(cell) {
+          return cell !== '' && cell != null;
+        }
+        function loadFileData(filename) {
+        if (gk_isXlsx && gk_xlsxFileLookup[filename]) {
+            try {
+                var workbook = XLSX.read(gk_fileData[filename], { type: 'base64' });
+                var firstSheetName = workbook.SheetNames[0];
+                var worksheet = workbook.Sheets[firstSheetName];
+
+                // Convert sheet to JSON to filter blank rows
+                var jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1, blankrows: false, defval: '' });
+                // Filter out blank rows (rows where all cells are empty, null, or undefined)
+                var filteredData = jsonData.filter(row => row.some(filledCell));
+
+                // Heuristic to find the header row by ignoring rows with fewer filled cells than the next row
+                var headerRowIndex = filteredData.findIndex((row, index) =>
+                  row.filter(filledCell).length >= filteredData[index + 1]?.filter(filledCell).length
+                );
+                // Fallback
+                if (headerRowIndex === -1 || headerRowIndex > 25) {
+                  headerRowIndex = 0;
+                }
+
+                // Convert filtered JSON back to CSV
+                var csv = XLSX.utils.aoa_to_sheet(filteredData.slice(headerRowIndex)); // Create a new sheet from filtered array of arrays
+                csv = XLSX.utils.sheet_to_csv(csv, { header: 1 });
+                return csv;
+            } catch (e) {
+                console.error(e);
+                return "";
+            }
+        }
+        return gk_fileData[filename] || "";
+        }
+        </script><!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CyberVault: NeuralNet Scanner</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&display=swap');
+
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            margin: 0;
+            font-family: 'Orbitron', sans-serif;
+            background: #0d0d0d;
+            color: #ffffff;
+            min-height: 100vh;
+            overflow-x: hidden;
+            position: relative;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        .background-video {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            z-index: -2;
+        }
+
+        .background-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.5);
+            z-index: -1;
+        }
+
+        .background-animation {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: -1;
+            overflow: hidden;
+        }
+
+        .code-stream {
+            position: absolute;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            color: #ff3333;
+            font-size: 1rem;
+            opacity: 0.85;
+            overflow: hidden;
+            white-space: pre;
+            text-shadow: 0 0 10px #ff3333, 0 0 20px #ff3333;
+            animation: stream 8s linear infinite, glitchText 1s infinite;
+        }
+
+        .matrix-code {
+            position: absolute;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            color: #00ff00;
+            font-size: 0.9rem;
+            opacity: 0.7;
+            overflow: hidden;
+            white-space: pre;
+            animation: matrix 6s linear infinite;
+        }
+
+        .hex-pattern {
+            position: absolute;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            color: #60a5fa;
+            font-size: 0.85rem;
+            opacity: 0.5;
+            overflow: hidden;
+            white-space: pre;
+            animation: hexFlow 10s linear infinite;
+        }
+
+        .binary-flicker {
+            position: absolute;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            color: #ffffff;
+            font-size: 0.8rem;
+            opacity: 0.3;
+            overflow: hidden;
+            white-space: pre;
+            animation: flickerBinary 1.5s infinite;
+        }
+
+        .container-wrapper, .signup-container-wrapper, .login-container-wrapper {
+            max-width: 400px;
+            width: 92%;
+            padding: 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+        }
+
+        .container, .signup-container, .login-container {
+            background: rgba(139, 92, 246, 0.9);
+            border: none;
+            border-radius: 10px;
+            padding: 1.5rem;
+            max-width: 400px;
+            width: 100%;
+            box-shadow: 0 0 15px #8b5cf6, 0 0 30px #8b5cf6;
+            position: relative;
+            z-index: 1;
+            overflow: hidden;
+        }
+
+        .neon-border {
+            position: absolute;
+            top: -3px;
+            left: -3px;
+            right: -3px;
+            bottom: -3px;
+            border-radius: 10px;
+            background: linear-gradient(45deg, #ffffff, #93c5fd, #ffffff, #93c5fd);
+            background-size: 400%;
+            animation: neonRun 2.5s linear infinite;
+            z-index: -1;
+        }
+
+        .container::before, .signup-container::before, .login-container::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: -100%;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(90deg, transparent, rgba(147, 197, 253, 0.4), transparent);
+            animation: glitch 2s infinite;
+        }
+
+        .hacker-image {
+            display: block;
+            width: 120px;
+            margin: 0 auto 0.8rem;
+            box-shadow: 0 0 15px #93c5fd, 0 0 30px #60a5fa;
+            animation: glitchImage 1.5s infinite;
+        }
+
+        h1 {
+            text-align: center;
+            font-size: 1.8rem;
+            text-transform: uppercase;
+            color: #ffffff;
+            text-shadow: 0 0 10px #93c5fd, 0 0 20px #93c5fd;
+            margin: 0 0 1rem;
+            animation: flicker 1s infinite;
+        }
+
+        .form-group {
+            margin-bottom: 1rem;
+        }
+
+        label {
+            display: block;
+            font-size: 0.85rem;
+            margin-bottom: 0.4rem;
+            color: #ffffff;
+            text-shadow: 0 0 3px #93c5fd;
+        }
+
+        input {
+            width: 100%;
+            padding: 0.7rem;
+            background: #1a1a1a;
+            border: 2px solid #93c5fd;
+            border-radius: 5px;
+            color: #ffffff;
+            font-family: 'Orbitron', sans-serif;
+            font-size: 0.9rem;
+            outline: none;
+            transition: box-shadow 0.3s, transform 0.2s;
+            box-shadow: 0 0 10px rgba(147, 197, 253, 0.7), 0 0 20px rgba(147, 197, 253, 0.5);
+        }
+
+        input:focus {
+            box-shadow: 0 0 15px rgba(147, 197, 253, 0.9), 0 0 30px rgba(147, 197, 253, 0.7);
+            transform: scale(1.02);
+        }
+
+        button {
+            width: 100%;
+            padding: 0.7rem;
+            background: #93c5fd;
+            border: none;
+            border-radius: 5px;
+            color: #0d0d0d;
+            font-size: 0.9rem;
+            font-weight: bold;
+            cursor: pointer;
+            transition: background 0.3s, transform 0.2s, box-shadow 0.3s;
+            box-shadow: 0 0 10px rgba(147, 197, 253, 0.6);
+        }
+
+        button:hover {
+            background: #60a5fa;
+            transform: scale(1.05);
+            box-shadow: 0 0 15px rgba(147, 197, 253, 0.9);
+        }
+
+        button:disabled {
+            background: #1e3a8a;
+            cursor: not-allowed;
+            transform: none;
+            box-shadow: none;
+        }
+
+        .link {
+            text-align: center;
+            margin-top: 0.7rem;
+            color: #ffffff;
+            text-decoration: none;
+            font-size: 0.8rem;
+            transition: color 0.3s;
+        }
+
+        .link:hover {
+            color: #93c5fd;
+            text-shadow: 0 0 6px #93c5fd;
+        }
+
+        .error {
+            background: rgba(255, 0, 0, 0.3);
+            border: 2px solid #ff0000;
+            color: #ff3333;
+            padding: 0.7rem;
+            border-radius: 5px;
+            text-align: center;
+            margin-top: 0.7rem;
+            animation: shake 0.3s;
+            display: none;
+            text-shadow: 0 0 3px #ff3333;
+        }
+
+        .result {
+            background: rgba(147, 197, 253, 0.3);
+            border: 2px solid #93c5fd;
+            padding: 0.7rem;
+            border-radius: 5px;
+            text-align: center;
+            margin-top: 0.7rem;
+            animation: fadeIn 0.3s;
+            display: none;
+            color: #ffffff;
+        }
+
+        .result.phishing {
+            background: rgba(255, 0, 0, 0.3);
+            border: 2px solid #ff0000;
+            color: #ff3333;
+        }
+
+        @keyframes glitch {
+            0% { left: -100%; }
+            10% { left: 100%; }
+            100% { left: 100%; }
+        }
+
+        @keyframes flicker {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.6; }
+        }
+
+        @keyframes shake {
+            0%, 100% { transform: translateX(0); }
+            25% { transform: translateX(-3px); }
+            75% { transform: translateX(3px); }
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(6px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        @keyframes stream {
+            0% { transform: translateY(100%); }
+            100% { transform: translateY(-100%); }
+        }
+
+        @keyframes matrix {
+            0% { transform: translateY(0); }
+            100% { transform: translateY(-100%); }
+        }
+
+        @keyframes hexFlow {
+            0% { transform: translateY(100%); }
+            100% { transform: translateY(-100%); }
+        }
+
+        @keyframes flickerBinary {
+            0%, 100% { opacity: 0.3; }
+            50% { opacity: 0.1; }
+        }
+
+        @keyframes glitchText {
+            0%, 100% { transform: translate(0, 0); }
+            20% { transform: translate(-2px, 2px); }
+            40% { transform: translate(2px, -2px); }
+        }
+
+        @keyframes glitchImage {
+            0%, 100% { transform: translate(0, 0); opacity: 1; }
+            20% { transform: translate(-3px, 3px); opacity: 0.8; }
+            40% { transform: translate(3px, -3px); opacity: 0.9; }
+        }
+
+        @keyframes neonRun {
+            0% { background-position: 0% 0%; }
+            100% { background-position: 400% 0%; }
+        }
+
+        @media (max-width: 600px) {
+            h1 { font-size: 1.5rem; }
+            .container, .signup-container, .login-container { padding: 1rem; }
+            input, button { font-size: 0.85rem; padding: 0.6rem; }
+            .hacker-image { width: 100px; }
+            .container-wrapper, .signup-container-wrapper, .login-container-wrapper { max-width: 340px; }
+            .form-group { margin-bottom: 0.8rem; }
+            label { font-size: 0.8rem; }
+        }
+    </style>
+</head>
+<body>
+    <video class="background-video" autoplay muted loop playsinline>
+        <source src="background.mp4" type="video/mp4">
+        Your browser does not support the video tag.
+    </video>
+    <div class="background-overlay"></div>
+    <div class="background-animation">
+        <div class="code-stream">
+            1010101 PACKET LOSS DETECTED 1100110
+            ALERT: FIREWALL BREACHED!!!
+            0010110 MALICIOUS PAYLOAD INJECTED...
+            [CRITICAL] NEURAL OVERRIDE ACTIVE
+            1110001 DATA EXFILTRATION DETECTED...
+            ...KERNEL HACK DEPLOYED... 010101
+            KEY: 0xDEAD666CYBER
+            1001100 SYSTEM INFILTRATION!!!
+        </div>
+        <div class="matrix-code">
+            0101 1100 0011 1010 1111
+            1111 0000 1010 0101 0010
+            0010 1111 0100 1001 1100
+            1100 0011 1010 0110 0101
+            0101 1100 0011 1010 1111
+        </div>
+        <div class="hex-pattern">
+            0xDEADBEEF 0xCAFEBABE 0x1337CYBER
+            0xFEEDFACE 0xBADC0DE 0xDEAD666
+            0xHACK1337 0xC0DEFFFF 0xABCD1234
+            0xDEADBEEF 0xCAFEBABE 0x1337CYBER
+        </div>
+        <div class="binary-flicker">
+            1010 0011 1100 0101 1111
+            0000 1010 1111 0100 1001
+            1100 0011 1010 0110 0101
+            1010 0011 1100 0101 1111
+        </div>
+    </div>
+
+    <div class="login-container-wrapper">
+        <div class="login-container" id="login-container">
+            <div class="neon-border"></div>
+            <img src="hacker.png" alt="Neon Hacker" class="hacker-image" onerror="this.style.display='none'">
+            <h1>NeuralNet Authentication</h1>
+            <div class="form-group">
+                <label for="login-username">USER ID</label>
+                <input type="text" id="login-username" placeholder="Enter Neural ID">
+            </div>
+            <div class="form-group">
+                <label for="login-password">ENCRYPTION KEY</label>
+                <input type="password" id="login-password" placeholder="Access Code">
+            </div>
+            <button id="login-button">INITIATE AUTH</button>
+            <a href="#" class="link" onclick="alert('SECURE KEY RESET PROTOCOL COMING SOON')">FORGOT ENCRYPTION KEY?</a>
+            <div id="login-error" class="error"></div>
+            <p style="text-align: center; margin-top: 0.7rem;"><a href="#" class="link" onclick="showSignup()">NO NEURAL ID? REGISTER SYSTEM ACCESS</a></p>
+        </div>
+    </div>
+
+    <div class="signup-container-wrapper" style="display: none;">
+        <div class="signup-container" id="signup-container">
+            <div class="neon-border"></div>
+            <img src="hacker.png" alt="Neon Hacker" class="hacker-image" onerror="this.style.display='none'">
+            <h1>System Registration</h1>
+            <div class="form-group">
+                <label for="signup-name">OPERATOR NAME</label>
+                <input type="text" id="signup-name" placeholder="Neural Operator">
+            </div>
+            <div class="form-group">
+                <label for="signup-username">USERID</label>
+                <input type="text" id="signup-username" placeholder="Create Neural ID">
+            </div>
+            <div class="form-group">
+                <label for="signup-password">ENCRYPTION KEY</label>
+                <input type="password" id="signup-password" placeholder="Set Access Code">
+            </div>
+            <div class="form-group">
+                <label for="signup-mobile">COMM LINK</label>
+                <input type="text" id="signup-mobile" placeholder="Neural Comm (+1234567890)">
+            </div>
+            <div class="form-group">
+                <label for="signup-email">DATA RELAY</label>
+                <input type="email" id="signup-email" placeholder="relay@neural.net">
+            </div>
+            <button id="signup-button">DEPLOY REGISTRATION</button>
+            <div id="signup-error" class="error"></div>
+            <p style="text-align: center; margin-top: 0.7rem;"><a href="#" class="link" onclick="showLogin()">SYSTEM ACCESS EXISTS? AUTHENTICATE</a></p>
+        </div>
+    </div>
+
+    <div class="container-wrapper" style="display: none;">
+        <div class="container" id="main-container">
+            <div class="neon-border"></div>
+            <img src="hacker.png" alt="Neon Hacker" class="hacker-image" onerror="this.style.display='none'">
+            <h1>NeuralNet URL Scanner</h1>
+            <div class="form-group">
+                <label for="url-input">TARGET VECTOR</label>
+                <input type="text" id="url-input" placeholder="https://neural.target">
+            </div>
+            <button id="scan-button">EXECUTE SCAN</button>
+            <div id="error" class="error"></div>
+            <div id="result" class="result">
+                <h2 id="result-title"></h2>
+                <p id="result-url"></p>
+                <p id="result-confidence"></p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        var gk_isXlsx = false;
+        var gk_xlsxFileLookup = {};
+        var gk_fileData = {};
+        function filledCell(cell) {
+          return cell !== '' && cell != null;
+        }
+        function loadFileData(filename) {
+        if (gk_isXlsx && gk_xlsxFileLookup[filename]) {
+            try {
+                var workbook = XLSX.read(gk_fileData[filename], { type: 'base64' });
+                var firstSheetName = workbook.SheetNames[0];
+                var worksheet = workbook.Sheets[firstSheetName];
+                var jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1, blankrows: false, defval: '' });
+                var filteredData = jsonData.filter(row => row.some(filledCell));
+                var headerRowIndex = filteredData.findIndex((row, index) =>
+                  row.filter(filledCell).length >= filteredData[index + 1]?.filter(filledCell).length
+                );
+                if (headerRowIndex === -1 || headerRowIndex > 25) {
+                  headerRowIndex = 0;
+                }
+                var csv = XLSX.utils.aoa_to_sheet(filteredData.slice(headerRowIndex));
+                csv = XLSX.utils.sheet_to_csv(csv, { header: 1 });
+                return csv;
+            } catch (e) {
+                console.error(e);
+                return "";
+            }
+        }
+        return gk_fileData[filename] || "";
+        }
+
+        const loginContainer = document.getElementById('login-container');
+        const signupContainer = document.getElementById('signup-container');
+        const mainContainer = document.getElementById('main-container');
+        const loginUsername = document.getElementById('login-username');
+        const loginPassword = document.getElementById('login-password');
+        const loginButton = document.getElementById('login-button');
+        const loginError = document.getElementById('login-error');
+        const signupName = document.getElementById('signup-name');
+        const signupUsername = document.getElementById('signup-username');
+        const signupPassword = document.getElementById('signup-password');
+        const signupMobile = document.getElementById('signup-mobile');
+        const signupEmail = document.getElementById('signup-email');
+        const signupButton = document.getElementById('signup-button');
+        const signupError = document.getElementById('signup-error');
+        const urlInput = document.getElementById('url-input');
+        const scanButton = document.getElementById('scan-button');
+        const errorDiv = document.getElementById('error');
+        const resultDiv = document.getElementById('result');
+        const resultTitle = document.getElementById('result-title');
+        const resultUrl = document.getElementById('result-url');
+        const resultConfidence = document.getElementById('result-confidence');
+
+        let currentUsername = '';
+
+        function validateUrl(url) {
+            if (!url) return false;
+            const validTlds = ['.co', '.in', '.com'];
+            return validTlds.some(tld => url.toLowerCase().endsWith(tld));
+        }
+
+        function showSignup() {
+            document.querySelector('.login-container-wrapper').style.display = 'none';
+            document.querySelector('.signup-container-wrapper').style.display = 'flex';
+            document.querySelector('.container-wrapper').style.display = 'none';
+        }
+
+        function showLogin() {
+            document.querySelector('.login-container-wrapper').style.display = 'flex';
+            document.querySelector('.signup-container-wrapper').style.display = 'none';
+            document.querySelector('.container-wrapper').style.display = 'none';
+        }
+
+        signupButton.addEventListener('click', async () => {
+            const name = signupName.value.trim();
+            const username = signupUsername.value.trim();
+            const password = signupPassword.value.trim();
+            const mobile = signupMobile.value.trim();
+            const email = signupEmail.value.trim();
+            signupError.style.display = 'none';
+
+            try {
+                if (!name || !username || !password || !mobile || !email) {
+                    throw new Error('ALL SYSTEM FIELDS REQUIRED FOR REGISTRATION');
+                }
+
+                const response = await fetch('http://localhost:5000/signup', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name, username, password, mobile, email })
+                });
+
+                const data = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(data.error || 'REGISTRATION PROTOCOL FAILED');
+                }
+
+                document.querySelector('.signup-container-wrapper').style.display = 'none';
+                document.querySelector('.login-container-wrapper').style.display = 'flex';
+            } catch (err) {
+                signupError.textContent = err.message;
+                signupError.style.display = 'block';
+            }
+        });
+
+        loginButton.addEventListener('click', async () => {
+            const username = loginUsername.value.trim();
+            const password = loginPassword.value.trim();
+            loginError.style.display = 'none';
+
+            try {
+                if (!username || !password) {
+                    throw new Error('AUTHENTICATION CREDENTIALS REQUIRED');
+                }
+
+                const response = await fetch('http://localhost:5000/login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ username, password })
+                });
+
+                const data = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(data.error || 'AUTHENTICATION PROTOCOL FAILED');
+                }
+
+                currentUsername = username;
+                document.querySelector('.login-container-wrapper').style.display = 'none';
+                document.querySelector('.container-wrapper').style.display = 'flex';
+            } catch (err) {
+                loginError.textContent = err.message;
+                loginError.style.display = 'block';
+                if (err.message.includes('USER NOT FOUND')) {
+                    showSignup();
+                }
+            }
+        });
+
+        scanButton.addEventListener('click', async () => {
+            const url = urlInput.value.trim();
+            errorDiv.style.display = 'none';
+            resultDiv.style.display = 'none';
+            scanButton.disabled = true;
+            scanButton.textContent = 'EXECUTING NEURAL SCAN...';
+
+            try {
+                if (!url) {
+                    throw new Error('TARGET VECTOR REQUIRED FOR SCAN');
+                }
+
+                if (!validateUrl(url)) {
+                    throw new Error('INVALID TARGET VECTOR: VALID TLD REQUIRED');
+                }
+
+                const response = await fetch('http://localhost:5000/predict', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ url, username: currentUsername })
+                });
+
+                const data = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(data.error || 'NEURAL SCAN FAILED');
+                }
+
+                resultDiv.className = `result ${data.result === 'Phishing' ? 'phishing' : ''}`;
+                resultTitle.textContent = data.result === 'Phishing' ? '⚠️ THREAT DETECTED: PHISHING VECTOR' : '✅ NEURAL VERIFICATION: LEGITIMATE';
+                resultUrl.textContent = `TARGET: ${data.url}`;
+                resultConfidence.textContent = `THREAT PROBABILITY: ${data.probability}%`;
+                resultDiv.style.display = 'block';
+            } catch (err) {
+                errorDiv.textContent = err.message;
+                errorDiv.style.display = 'block';
+            } finally {
+                scanButton.disabled = false;
+                scanButton.textContent = 'EXECUTE SCAN';
+            }
+        });
+    </script>
+    <script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'93d760663dc5d1b7',t:'MTc0Njg1ODUwNy4wMDAwMDA='};var a=document.createElement('script');a.nonce='';a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script>
+</body>
+</html>
